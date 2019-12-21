@@ -1,0 +1,1 @@
+#define ZMQ_DEBUG

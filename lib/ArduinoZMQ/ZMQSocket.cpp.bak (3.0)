@@ -1,0 +1,331 @@
+#include "ArduinoZMQ.h"
+
+template <typename Generic>
+void ZMQSocket::log(Generic text)
+{
+    Serial.print("ZQM: ");
+    Serial.println(text);
+}
+
+void ZMQSocket::log()
+{
+    log("");
+}
+
+ZMQSocket::ZMQSocket(ZMQSocketType type, WiFiClient *client)
+{
+    this->_type = type;
+    this->_client = client;
+
+    this->initialize();
+}
+
+ZMQSocketType ZMQSocket::getType()
+{
+    return this->_type;
+}
+
+/**
+ * Check whether socket is connected.
+ */
+boolean ZMQSocket::connected()
+{
+    return this->_connected;
+}
+
+/**
+ * Connect specificed SOCKET TYPE to the HOST on PORT.
+ * Provides reference to the connection SOCKET instance.
+ */
+ZMQSocket *ZMQSocket::connect(ZMQSocketType type,
+                              const char *host,
+                              uint16_t port)
+{
+    auto client = new WiFiClient();
+
+    if (!client->connect(host, port))
+    {
+#ifdef ZMQ_DEBUG
+        Serial.printf("ZMQ: Host %s:%d is unavailable.\n", host, port);
+#endif
+        // TODO: Do not fail but instead silently try to reconnect.
+    }
+
+    return new ZMQSocket(type, client);
+}
+
+/**
+ * Initialize socket connection.
+ */
+void ZMQSocket::initialize()
+{
+    char buffer;
+    uint32_t bufferCursor;
+
+// #ifdef ZMQ_DEBUG
+//     log("RESPONSE");
+// #endif
+
+//     // Check if peer is using ZMTP/1.0 short frame length.
+//     this->_client->readBytes(&buffer, 1);
+
+// #ifdef ZMQ_DEBUG
+//     Serial.printf("%02X", buffer);
+// #endif
+
+//     if (buffer != 0xff)
+//     {
+//         // This is definitely ZTMP/1.0.
+//         this->_zmq_version = ZMQ_VERSION_1;
+//     }
+//     else
+//     {
+//         bufferCursor = 1;
+//         while (bufferCursor < 10)
+//         {
+//             if (this->_client->readBytes(&buffer, 1) != 0)
+//             {
+// #ifdef ZMQ_DEBUG
+//                 Serial.printf("%02X", buffer);
+// #endif
+
+//                 /**
+//                  * ZMTP 1.0 and 2.0 backwards interoperability.
+//                  * Here _zmq_version = 0 means it hasn't been initialized yet.
+//                  */
+//                 if (_zmq_version == 0 && bufferCursor == 10)
+//                 {
+//                     // Check if peer is using ZMTP/1.0 long frame length.
+//                     if ((buffer & 1) == 0)
+//                     {
+//                         _zmq_version = ZMQ_VERSION_1;
+//                     }
+//                     // Otherwise peer is using ZMTP/2.0 or a later version.
+//                     // We then encode/decode all further frames
+//                     // on that connection using the ZMTP/2.0 framing syntax.
+//                     else
+//                     {
+//                         _zmq_version = ZMQ_VERSION_2;
+//                     }
+//                 }
+
+//                 bufferCursor++;
+//             }
+//             else
+//             {
+//                 break;
+//             }
+//         }
+
+// #ifdef ZMQ_DEBUG
+//         Serial.println();
+// #endif
+//     }
+
+    if (_zmq_version == ZMQ_VERSION_1)
+    {
+        Serial.println("ERROR: ZMTP/1.0 is not supported.");
+        return;
+    }
+    else
+    {
+        char greetingHead[] = {
+            // signature
+            0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x7F,
+            // revision
+            0x01,
+            // socket-type
+            0x03,
+            // identity
+            0x00, 0x00,
+            //
+        };
+
+#ifdef ZMQ_DEBUG
+        log("REQUEST");
+        for (uint8_t i = 0; i < sizeof(greetingHead); i++)
+        {
+            Serial.printf("%02X", greetingHead[i]);
+        }
+        Serial.println();
+#endif
+
+        this->_client->write(greetingHead, sizeof(greetingHead));
+
+        // Read next octet for ZMTP revision.
+        this->_client->readBytes(&buffer, 10);
+
+#ifdef ZMQ_DEBUG
+        log("RESPONSE");
+        Serial.printf("%02X\n", buffer);
+#endif
+
+        // if (buffer == 1 || buffer == 2)
+        // {
+        //     _zmq_version = ZMQ_VERSION_2;
+        // }
+        // // else if (buffer == 3)
+        // // {
+        // //     _zmq_version = ZMQ_VERSION_3;
+        // // }
+        // else
+        // {
+        //     Serial.printf("ERROR: Unknown ZMTP version number '%d'.\n", buffer);
+        //     return;
+        // }
+
+#ifdef ZMQ_DEBUG
+        log("RESPONSE");
+#endif
+        bufferCursor = 0;
+        while (1)
+        {
+            if (this->_client->readBytes(&buffer, 1) != 0)
+            {
+#ifdef ZMQ_DEBUG
+                Serial.printf("%02X", buffer);
+#endif
+                bufferCursor++;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+#ifdef ZMQ_DEBUG
+        Serial.println();
+#endif
+    }
+
+#ifdef ZMQ_DEBUG
+    Serial.printf("ZQM: _zmq_version = %d\n", _zmq_version);
+#endif
+
+    switch (_zmq_version)
+    {
+    case 3:
+    {
+        char greetingTail[] = {
+            // version (3.0 minor part)
+            0x00,
+            // mechanism
+            'N', 'U', 'L', 'L', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // as-server
+            0x00,
+            // filler
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            //
+        };
+
+#ifdef ZMQ_DEBUG
+        log("REQUEST");
+        for (uint8_t i = 0; i < sizeof(greetingTail); i++)
+        {
+            Serial.printf("%02X", greetingTail[i]);
+        }
+        Serial.println();
+#endif
+
+        this->_client->write(greetingTail, sizeof(greetingTail));
+
+#ifdef ZMQ_DEBUG
+        log("RESPONSE");
+#endif
+        bufferCursor = 0;
+        while (bufferCursor < (64 - 11))
+        {
+            if (this->_client->readBytes(&buffer, 1) != 0)
+            {
+#ifdef ZMQ_DEBUG
+                Serial.printf("%02X", buffer);
+#endif
+                bufferCursor++;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+#ifdef ZMQ_DEBUG
+        Serial.println();
+#endif
+
+        char handshake[] = {
+            // READY command
+            // command-flags
+            0x04, // command frame (bit 2)
+            // command-size
+            38,
+            // command-body
+            5, 'R', 'E', 'A', 'D', 'Y',
+            // command-data
+            //   property-name
+            11, 'S', 'o', 'c', 'k', 'e', 't', '-', 'T', 'y', 'p', 'e',
+            //   property-value
+            0x00, 0x00, 0x00, 0x03, 'R', 'E', 'Q',
+            //   property-name
+            8, 'I', 'd', 'e', 'n', 't', 'i', 't', 'y',
+            //   property-value
+            0x00, 0x00, 0x00, 0x00,
+            //
+        };
+
+#ifdef ZMQ_DEBUG
+        log("REQUEST");
+        for (uint8_t i = 0; i < sizeof(handshake); i++)
+        {
+            Serial.printf("%02X", handshake[i]);
+        }
+        Serial.println();
+#endif
+
+        this->_client->write(handshake, sizeof(handshake));
+
+        break;
+    }
+    }
+}
+
+/**
+ * Try to send given buffer over the socket.
+ */
+void ZMQSocket::send(const char *buffer)
+{
+    if (this->_client->connected())
+    {
+#ifdef ZMQ_DEBUG
+        log("SEND");
+        for (uint8_t i = 0; i < sizeof(buffer); i++)
+        {
+            Serial.printf("%02X", buffer[i]);
+        }
+        Serial.println();
+#endif
+        this->_client->write(buffer, sizeof(buffer));
+    }
+}
+
+/**
+ * Try to recieve message on the socket.
+ */
+size_t ZMQSocket::recv(char *buffer, size_t length)
+{
+    if (this->_client->connected())
+    {
+        auto result = this->_client->readBytes(buffer, length);
+
+#ifdef ZMQ_DEBUG
+        log("RECV");
+        for (uint8_t i = 0; i < length; i++)
+        {
+            Serial.printf("%02X", buffer[i]);
+        }
+        Serial.println();
+#endif
+        return result;
+    }
+
+    return 0;
+}

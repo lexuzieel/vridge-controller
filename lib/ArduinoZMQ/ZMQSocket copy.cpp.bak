@@ -1,0 +1,628 @@
+#include "ArduinoZMQ.h"
+
+std::vector<ZMQSocket*>* ZMQSocket::_sockets;
+unsigned long ZMQSocket::_workerTimestamp = millis();
+size_t ZMQSocket::_workerSocketPointer = 0;
+
+template <typename Generic>
+void ZMQSocket::log(Generic text)
+{
+    Serial.print("ZQM: ");
+    Serial.println(text);
+}
+
+void ZMQSocket::log()
+{
+    log("");
+}
+
+ZMQSocket::ZMQSocket(ZMQSocketType type, ZMQPeer* peer)
+{
+    this->_type = type;
+    // peer->getClient() = client;
+
+    this->_peers = new std::vector<ZMQPeer*>();
+    this->_peers->push_back(peer);
+
+    this->_messageQueue = new std::vector<const char*>();
+
+    // this->initialize();
+}
+
+ZMQSocketType ZMQSocket::getType()
+{
+    return this->_type;
+}
+
+/**
+ * Check whether socket is connected.
+ */
+boolean ZMQSocket::connected()
+{
+    return this->_connected;
+}
+
+/**
+ * Connect specificed SOCKET TYPE to the HOST on PORT.
+ * Provides reference to the connection SOCKET instance.
+ */
+// boolean ZMQSocket::reconnect(const char* host,
+//                              uint16_t port)
+// {
+//     auto client = new WiFiClient();
+
+//     if (!client->connect(host, port))
+//     {
+// #ifdef ZMQ_DEBUG
+//         Serial.printf("ZMQ: Host %s:%d is unavailable.\n", host, port);
+// #endif
+//     }
+
+//     return socket;
+// }
+
+/**
+ * Connect specificed SOCKET TYPE to the HOST on PORT.
+ * Provides reference to the connection SOCKET instance.
+ */
+ZMQSocket* ZMQSocket::connect(ZMQSocketType type,
+                              const char* host,
+                              uint16_t port)
+{
+    //     auto client = new WiFiClient();
+
+    //     if (!client->connect(host, port))
+    //     {
+    // #ifdef ZMQ_DEBUG
+    //         Serial.printf("ZMQ: Host %s:%d is unavailable.\n", host, port);
+    // #endif
+    //         // TODO: Do not fail but instead silently try to reconnect.
+    //     }
+
+    auto peer = new ZMQPeer(host, port);
+
+    auto socket = new ZMQSocket(type, peer);
+
+    if (ZMQSocket::_sockets == NULL)
+    {
+        ZMQSocket::_sockets = new std::vector<ZMQSocket*>();
+    }
+
+    ZMQSocket::_sockets->push_back(socket);
+
+    return socket;
+}
+
+/**
+ * Work on the next socket.
+ * Use this method in the main loop to run ZMQ in async manner.
+ */
+void ZMQSocket::work()
+{
+    if (millis() - ZMQSocket::_workerTimestamp <= 1000)
+    {
+        // Wait until next work cycle
+        return;
+    }
+
+    ZMQSocket::_workerTimestamp = millis();
+
+    if (ZMQSocket::_workerSocketPointer >= ZMQSocket::_sockets->size())
+    {
+        ZMQSocket::_workerSocketPointer = 0;
+    }
+
+    // Serial.printf("Sockets: %d\n", ZMQSocket::_sockets->size());
+
+    if (ZMQSocket::_sockets->size() > 0)
+    {
+        auto socket = ZMQSocket::_sockets->at(ZMQSocket::_workerSocketPointer);
+
+        if (socket->connected())
+        {
+            //
+        }
+        else
+        {
+            //
+        }
+    }
+}
+
+/**
+ * Send given buffer over the socket.
+ */
+void ZMQSocket::send(const char* buffer)
+{
+    switch (this->_type)
+    {
+        case ZMQSocketType::REQ:
+        {
+            // this->peerSend(buffer);
+            break;
+        }
+    }
+}
+
+/**
+ * Recieve next message.
+ */
+std::string* ZMQSocket::recv()
+{
+    switch (this->_type)
+    {
+        case ZMQSocketType::REQ:
+        {
+            // return this->peerRecv();
+            break;
+        }
+    }
+
+    return new std::string();
+}
+
+/**
+ * Initialize connection to the peer.
+ */
+void ZMQSocket::initialize(ZMQPeer* peer)
+{
+    if (peer->getClient()->connected() == false)
+    {
+        log("Host unavailable.");
+        this->_connected = false;
+        return;
+    }
+
+    if (this->_connected)
+    {
+        log("Already connected.");
+        return;
+    }
+
+    char buffer;
+    size_t bufferCursor;
+
+    char signature[] = {
+        // signature
+        0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F,
+        // revision
+        0x01,
+        // socket-type
+        this->_type,
+        // identity
+        0x00, 0x00
+        //
+    };
+
+#ifdef ZMQ_DEBUG
+    log("REQUEST");
+    for (uint8_t i = 0; i < sizeof(signature); i++)
+    {
+        Serial.printf("%02X", signature[i]);
+    }
+    Serial.println();
+#endif
+
+    peer->getClient()->write(signature, sizeof(signature));
+
+    //     char revision[] = {
+    //         // revision
+    //         0x01,
+    //         // socket-type
+    //         this->_type,
+    //         //
+    //     };
+
+    // #ifdef ZMQ_DEBUG
+    //     log("REQUEST");
+    //     for (uint8_t i = 0; i < sizeof(revision); i++)
+    //     {
+    //         Serial.printf("%02X", revision[i]);
+    //     }
+    //     Serial.println();
+    // #endif
+
+    //     peer->getClient()->write(revision, sizeof(revision));
+
+    //     char identity[] = {
+    //         // identity
+    //         0x00, 0x00
+    //         //
+    //     };
+
+    // #ifdef ZMQ_DEBUG
+    //     log("REQUEST");
+    //     for (uint8_t i = 0; i < sizeof(identity); i++)
+    //     {
+    //         Serial.printf("%02X", identity[i]);
+    //     }
+    //     Serial.println();
+    // #endif
+
+    //     peer->getClient()->write(identity, sizeof(identity));
+
+    /**
+     * Signature
+     */
+#ifdef ZMQ_DEBUG
+    log("SIGNATURE");
+#endif
+    bufferCursor = 0;
+    while (bufferCursor < 10)
+    {
+        if (peer->getClient()->readBytes(&buffer, 1) != 0)
+        {
+#ifdef ZMQ_DEBUG
+            Serial.printf("%02X", buffer);
+            if (bufferCursor == 9 && buffer != 0x7F)
+            {
+                Serial.println();
+                Serial.printf(
+
+                    "ZMQ: Invalid signature format.\n"
+
+                );
+            }
+#endif
+            bufferCursor++;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+#ifdef ZMQ_DEBUG
+    Serial.println();
+#endif
+
+    /**
+     * Revision
+     */
+    peer->getClient()->readBytes(&buffer, 1);
+
+#ifdef ZMQ_DEBUG
+    log("REVISION");
+    Serial.printf("%02X\n", buffer);
+#endif
+
+    /**
+     * Socket-type
+     */
+    peer->getClient()->readBytes(&buffer, 1);
+
+#ifdef ZMQ_DEBUG
+    log("SOCKET-TYPE");
+    Serial.printf("%02X\n", buffer);
+#endif
+
+    switch (this->_type)
+    {
+        case ZMQSocketType::REQ:
+        {
+            if (buffer != 0x04)
+            {
+                Serial.printf(
+
+                    "ZMQ: Invalid socket type for socket REQ: only REP allowed.\n"
+
+                );
+                return;
+            }
+            break;
+        }
+    }
+
+    /**
+     * Identity
+     */
+    peer->getClient()->readBytes(&buffer, 1); // 0x00
+    peer->getClient()->readBytes(&buffer, 1); // Number of bytes?
+
+    uint8_t identityLength = buffer;
+
+#ifdef ZMQ_DEBUG
+    log("IDENTITY");
+#endif
+    bufferCursor = 0;
+    while (bufferCursor < identityLength)
+    {
+        if (peer->getClient()->readBytes(&buffer, 1) != 0)
+        {
+#ifdef ZMQ_DEBUG
+            Serial.printf("%02X", buffer);
+#endif
+            bufferCursor++;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+#ifdef ZMQ_DEBUG
+    Serial.println();
+#endif
+
+    //     char greetingTail[] = {
+    //         // version (3.0 minor part)
+    //         0x00,
+    //         // mechanism
+    //         'N', 'U', 'L', 'L', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //         // as-server
+    //         0x00,
+    //         // filler
+    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //         //
+    //     };
+
+    // #ifdef ZMQ_DEBUG
+    //     log("REQUEST");
+    //     for (uint8_t i = 0; i < sizeof(greetingTail); i++)
+    //     {
+    //         Serial.printf("%02X", greetingTail[i]);
+    //     }
+    //     Serial.println();
+    // #endif
+
+    //     peer->getClient()->write(greetingTail, sizeof(greetingTail));
+
+    // #ifdef ZMQ_DEBUG
+    //     log("RESPONSE");
+    // #endif
+    //     bufferCursor = 0;
+    //     while (bufferCursor < (64 - 11))
+    //     {
+    //         if (peer->getClient()->readBytes(&buffer, 1) != 0)
+    //         {
+    // #ifdef ZMQ_DEBUG
+    //             Serial.printf("%02X", buffer);
+    // #endif
+    //             bufferCursor++;
+    //         }
+    //         else
+    //         {
+    //             break;
+    //         }
+    //     }
+
+    // #ifdef ZMQ_DEBUG
+    //     Serial.println();
+    // #endif
+
+    //     char handshake[] = {
+    //         // READY command
+    //         // command-flags
+    //         0x04, // command frame (bit 2)
+    //         // command-size
+    //         38,
+    //         // command-body
+    //         5, 'R', 'E', 'A', 'D', 'Y',
+    //         // command-data
+    //         //   property-name
+    //         11, 'S', 'o', 'c', 'k', 'e', 't', '-', 'T', 'y', 'p', 'e',
+    //         //   property-value
+    //         0x00, 0x00, 0x00, 0x03, 'R', 'E', 'Q',
+    //         //   property-name
+    //         8, 'I', 'd', 'e', 'n', 't', 'i', 't', 'y',
+    //         //   property-value
+    //         0x00, 0x00, 0x00, 0x00,
+    //         //
+    //     };
+
+    // #ifdef ZMQ_DEBUG
+    //     log("REQUEST");
+    //     for (uint8_t i = 0; i < sizeof(handshake); i++)
+    //     {
+    //         Serial.printf("%02X", handshake[i]);
+    //     }
+    //     Serial.println();
+    // #endif
+
+    //     peer->getClient()->write(handshake, sizeof(handshake));
+    this->_connected = true;
+}
+
+/**
+ * Send message to the peer.
+ * For internal use only.
+ */
+void ZMQSocket::peerSend(ZMQPeer* peer, const char* buffer)
+{
+    if (this->_connected)
+    {
+        std::vector<char> frame = {};
+
+        // // empty frame
+        // frame.push_back(0x00); // flags: short frame
+        // frame.push_back(0x08); // length: 8
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x00);
+        // frame.push_back(0x01);
+
+        // peer->getClient()->write(frame.data(), frame.size());
+
+        // delay(1000);
+
+        // frame = {};
+        // delay(5000);
+
+        // empty frame
+        frame.push_back(0x01); // flags: LONG = 0, MORE = 1
+        frame.push_back(0x00); // length: 0
+
+        peer->getClient()->write(frame.data(), frame.size());
+
+        // delay(5000);
+
+        frame = {};
+
+        auto content = new std::string(buffer);
+        // "{\"ProtocolVersion\":1,\"Code\":2}";
+
+        auto length = content->length();
+
+        if (length < 0xFF)
+        {
+            frame.push_back(0x00); // flags: LONG = 0, MORE = 0
+
+            frame.push_back(length);
+        }
+        else
+        {
+            frame.push_back(0x02); // flags: LONG = 1, MORE = 0
+
+            for (int i = 7; i >= 0; i--)
+            {
+                if (i > 3)
+                {
+                    frame.push_back(0x00);
+                }
+                else
+                {
+                    // Decompose only the last 4 bytes (32 bits) of length
+                    frame.push_back((length >> (i * 8)) & 0xFF);
+                }
+            }
+        }
+
+        std::copy(content->begin(), content->end(), std::back_inserter(frame));
+
+        peer->getClient()->write(frame.data(), frame.size());
+
+#ifdef ZMQ_DEBUG
+        log("SEND");
+        for (uint8_t i = 0; i < frame.size(); i++)
+        {
+            Serial.printf("%02X", frame[i]);
+        }
+        Serial.println();
+#endif
+    }
+}
+
+/**
+ * Recieve message from the peer.
+ * For internal use only.
+ */
+std::string* ZMQSocket::peerRecv(ZMQPeer* peer)
+{
+    if (this->_connected)
+    {
+        // auto result = peer->getClient()->readBytes(buffer, length);
+
+        // if (peer->getClient() ->available() == 0)
+        // {
+        //     return 0;
+        // }
+
+#ifdef ZMQ_DEBUG
+        log("RECV");
+#endif
+        /**
+         * Check for malformed empty frame.
+         */
+        char byteBuffer;
+        boolean malformed = true;
+
+        peer->getClient()->readBytes(&byteBuffer, 1);
+        if (byteBuffer == 0x01)
+        {
+            peer->getClient()->readBytes(&byteBuffer, 1);
+            if (byteBuffer == 0x00)
+            {
+                malformed = false;
+            }
+        }
+
+        if (malformed)
+        {
+#ifdef ZMQ_DEBUG
+            log("ERROR: Malformed empty frame.");
+#endif
+            peer->getClient()->flush();
+            return new std::string();
+        }
+
+        boolean longFlag;
+        boolean moreFlag;
+        size_t frameLength = 0;
+        size_t bufferCursor = 0;
+
+        // Read the message.
+
+        if (peer->getClient()->readBytes(&byteBuffer, 1) != 0)
+        {
+            moreFlag = (byteBuffer & 0x01) > 0;
+            longFlag = (byteBuffer & 0x02) > 0;
+
+#ifdef ZMQ_DEBUG
+            log("FRAME START");
+            Serial.printf("MORE = %d\n", moreFlag);
+            Serial.printf("LONG = %d\n", longFlag);
+#endif
+
+            if (longFlag == false)
+            {
+                peer->getClient()->readBytes(&byteBuffer, 1);
+                frameLength = byteBuffer;
+            }
+            else
+            {
+                for (uint8_t i = 1; i <= 8; i++)
+                {
+                    peer->getClient()->readBytes(&byteBuffer, 1);
+                    frameLength |= byteBuffer << ((8 - i) * 8);
+                }
+            }
+
+#ifdef ZMQ_DEBUG
+            Serial.printf("LENGTH = %d\n", frameLength);
+#endif
+
+            // if (buffer != NULL)
+            // {
+            //     free(buffer);
+            // }
+
+            // buffer = (char *)realloc(buffer, sizeof(buffer) * frameLength);
+            // buffer = (char *)memset(buffer, 0, sizeof(buffer) * frameLength);
+            auto result = new std::string();
+
+            bufferCursor = 0;
+            while (bufferCursor < frameLength)
+            {
+                if (peer->getClient()->readBytes(&byteBuffer, 1) != 0)
+                {
+#ifdef ZMQ_DEBUG
+                    if (frameLength <= 1024)
+                    {
+                        Serial.printf("%02X", byteBuffer);
+                    }
+#endif
+
+                    result->push_back(byteBuffer);
+                    bufferCursor++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+#ifdef ZMQ_DEBUG
+            Serial.println();
+            log("FRAME END");
+#endif
+
+            return result;
+        }
+    }
+
+    return new std::string();
+}

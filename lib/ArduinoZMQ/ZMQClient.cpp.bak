@@ -1,0 +1,28 @@
+#include "ZMQClient.h"
+
+void ZMQClient::write(const char *buffer, size_t size)
+{
+    client.write(buffer, size);
+};
+
+size_t ZMQClient::read(char *buffer, size_t length)
+{
+    return client.readBytes(buffer, length);
+}
+
+boolean ZMQClient::connect(ZMQSocketType type,
+                           const char *host,
+                           uint16_t port,
+                           ZMQSocket *&socket)
+{
+    if (!client.connect(host, port))
+    {
+        Serial.printf("Unable to connect ZMQ socket to %s:%d\n", host, port);
+        // TODO: Do not fail but instead silently try to reconnect.
+        return false;
+    }
+
+    socket = new ZMQSocket(type, this);
+
+    return true;
+}

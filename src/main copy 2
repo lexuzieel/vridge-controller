@@ -1,0 +1,910 @@
+#include <Arduino.h>
+#include <string.h>
+// #include <ESP8266WiFi.h> // https://github.com/esp8266/Arduino
+
+//needed for library
+// #include <DNSServer.h>
+// #include <ESP8266WebServer.h>
+#include <ArduinoJson.h>
+#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
+
+#include <ArduinoZMQ.h>
+
+#include <pb_decode.h>
+#include <pb_encode.h>
+// #include <pb_common.h>
+#include <proto/vridge-api.pb.h>
+
+#define DEVICE_TITLE "Controller"
+char deviceName[32];
+
+char hostname[32] = "192.168.88.20";
+
+// WiFiClient client;
+
+// ZMQClient zmqClient;
+
+// #define ZMQ_VERSION_1 1
+// #define ZMQ_VERSION_2 2
+// #define ZMQ_VERSION_3 3
+
+// uint8_t _zmq_version = 0;
+// uint8_t _ZMQ_VERSION_major = 0;
+// uint8_t _ZMQ_VERSION_minor = 0;
+
+// auto Socket = new ESP8266ZMQ::Socket(ESP8266ZMQ::Socket_Type::REQ);
+// void print_response()
+// {
+//     uint8_t buffer = 0;
+
+//     Serial.println("RESPONSE:");
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+// }
+
+ZMQSocket* setupSocket = NULL;
+ZMQSocket* controllerSocket = NULL;
+int controllerTimeout = 0;
+
+// ZMQSocket* socket = NULL;
+
+// #define LED_EXT D3
+
+void connectVRidge(ZMQSocket* socket)
+{
+    socket->send("{\"ProtocolVersion\":1,\"Code\":2}");
+    // socket2->send("{\"ProtocolVersion\":1,\"Code\":8888888}");
+
+    auto reply = socket->recv();
+
+    // Serial.println(reply->c_str());
+
+    DynamicJsonDocument doc(2048);
+
+    deserializeJson(doc, reply->c_str());
+
+    boolean hasControllerEndpoint = false;
+
+    if (doc["Code"] == 0) // OK
+    {
+        for (JsonObject o : doc["Endpoints"].as<JsonArray>())
+        {
+            if (strcmp(o["Name"].as<const char*>(), "Controller") == 0)
+            {
+                hasControllerEndpoint = true;
+            }
+        }
+    }
+    else if (doc["Code"] == 2) // InUse
+    {
+        delay(1000);
+        connectVRidge(socket);
+    }
+
+    if (hasControllerEndpoint)
+    {
+        JsonObject object = doc.to<JsonObject>();
+        object["RequestingAppName"] = deviceName;
+        object["RequestedEndpointName"] = "Controller";
+        object["ProtocolVersion"] = 3;
+        object["Code"] = 1;
+
+        char buffer[1024];
+
+        serializeJson(object, buffer);
+
+        socket->send(buffer);
+
+        // object.clear();
+
+        // Serial.println(buffer);
+        auto reply = socket->recv();
+
+        Serial.println(reply->c_str());
+
+        deserializeJson(doc, reply->c_str());
+
+        if (doc["Code"] == 0) // OK
+        {
+            int port = doc["Port"].as<int>();
+            controllerTimeout = doc["TimeoutSec"].as<int>();
+
+            if (port > 0)
+            {
+                Serial.printf("Controller service port: %d\n", port);
+                controllerSocket = ZMQSocket::connect(REQ, hostname, port);
+            }
+        }
+        else if (doc["Code"] == 2) // InUse
+        {
+            delay(1000);
+            connectVRidge(socket);
+        }
+    }
+}
+
+void setup()
+{
+    // put your setup code here, to run once:
+    // pinMode(LED_EXT, OUTPUT);
+    // digitalWrite(LED_EXT, LOW);
+
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    // put your setup code here, to run once:
+    Serial.begin(115200);
+
+    sprintf(deviceName, "%s %02X", DEVICE_TITLE, ESP.getChipId());
+
+    //WiFiManager
+    //Local intialization. Once its business is done, there is no need to keep it around
+    WiFiManager wifiManager;
+
+    //reset saved settings
+    // wifiManager.resetSettings();
+
+    //set custom ip for portal
+    wifiManager.setAPStaticIPConfig(
+        IPAddress(10, 0, 1, 1),
+        IPAddress(10, 0, 1, 1),
+        IPAddress(255, 255, 255, 0));
+
+    //fetches ssid and pass from eeprom and tries to connect
+    //if it does not connect it starts an access point with the specified name
+    //here  "AutoConnectAP"
+    //and goes into a blocking loop awaiting configuration
+    wifiManager.autoConnect(deviceName);
+    //or use this for auto generated name ESP + ChipID
+    //wifiManager.autoConnect();
+
+    //if you get here you have connected to the WiFi
+    Serial.println("INFO: Connected!");
+
+    // if (!client.connect("192.168.88.20", 38219)) //38219))
+    // {
+    //     Serial.println("Connection to host failed");
+    // }
+
+    // client.setSync(true);
+
+    /**
+     * ZMTP initialization
+     */
+    setupSocket = ZMQSocket::connect(REQ, hostname, 38219);
+
+    // connectVRidge();
+
+    // auto socket = ZMQSocket::connect(REQ, hostname, 5555);
+    // socket->connect(hostname, 5556);
+    // char c[] = {'m', 'l', '0', 'e', 'm', '\0'};
+    // uint8_t c[] = {'m', 'l', 0, 'e', 'm', '\0'};
+    // socket->send(new ZMQMessage(c, strlen((char*)c)));
+    // socket->send("o");
+
+    // auto result = socket->recv(ZMQ_NOBLOCK);
+
+    // Serial.printf("%d\n", result == NULL);
+
+    // if (result != NULL)
+    // {
+    //     Serial.println(result->c_str());
+    // }
+    // else
+    // {
+    //     Serial.println("no recv");
+    // }
+
+    // while (socket->send("mlem") != ZMQ_STATUS_OK)
+    // {
+    // }
+    // Serial.printf("status %d\n", socket->send("mlem"));
+
+    // ZMQSocket::peerReconnectInteval = 5000;
+    // auto socket2 = ZMQSocket::connect(REQ, "192.168.88.20", 5556);
+
+    // socket->send("{\"ProtocolVersion\":1,\"Code\":2}");
+    // socket->send("Hello");
+
+    // char buffer[64] = "";
+
+    // socket->recv(buffer, sizeof(buffer));
+    // Serial.println(socket->recv()->c_str());
+
+    // doc["ProtocolVersion"] = 1;
+    // doc["Code"] = 2;
+
+    connectVRidge(setupSocket);
+
+    delete setupSocket;
+}
+
+// reply = socket2->recv();
+
+// Serial.println(reply->c_str());
+// Serial.println(reply->length());
+
+// if (socket != NULL && socket->getType() == REQ)
+// {
+//     Serial.println("es ist REQ");
+// }
+
+/**
+     * ZMTP initialization
+     */
+
+// uint8_t buffer;
+// uint32_t bufferCursor;
+
+// Serial.println("RESPONSE:");
+// // Check if peer is using ZMTP/1.0 short frame length
+// client.readBytes(&buffer, 1);
+// Serial.printf("%02X", buffer);
+// if (buffer != 0xff)
+// {
+//     _zmq_version = ZMQ_VERSION_1;
+// }
+// else
+// {
+//     bufferCursor = 0;
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+
+//             /**
+//              * ZMTP 1.0 and 2.0 backwards interoperability
+//              */
+//             if (_zmq_version == 0 && bufferCursor == 9)
+//             {
+//                 // Check if peer is using ZMTP/1.0 long frame length
+//                 if ((buffer & 1) == 0)
+//                 {
+//                     _zmq_version = ZMQ_VERSION_1;
+//                 }
+//                 // Otherwise peer is using ZMTP/2.0 or later,
+//                 // We will need to check ZMTP signature.
+//                 else
+//                 {
+//                     _zmq_version = ZMQ_VERSION_2;
+//                 }
+//             }
+
+//             bufferCursor++;
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+// }
+
+// if (_zmq_version == ZMQ_VERSION_1)
+// {
+//     Serial.println("ERROR: ZMTP/1.0 not supported.");
+//     return;
+// }
+// else
+// {
+//     char greetingHead[] = {
+//         // signature
+//         0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x7F,
+//         // version (3.0)
+//         // 0x03,
+//         //
+//     };
+
+//     Serial.printf("sizeof: %d", sizeof(greetingHead));
+//     Serial.println();
+
+//     Serial.println("REQUEST:");
+//     for (uint8_t i = 0; i < sizeof(greetingHead); i++)
+//     {
+//         Serial.printf("%02X", greetingHead[i]);
+//         // client.print(greetingHead[i]);
+//     }
+//     Serial.println();
+
+//     client.write(greetingHead, sizeof(greetingHead));
+
+//     // Read next octet for ZMTP revision.
+//     client.readBytes(&buffer, 1);
+//     if (buffer == 1 || buffer == 2)
+//     {
+//         _zmq_version = ZMQ_VERSION_2;
+//     }
+//     else if (buffer == 3)
+//     {
+//         _zmq_version = ZMQ_VERSION_3;
+//     }
+//     else
+//     {
+//         Serial.printf("ERROR: Unknown version number '%d'.\n", buffer);
+//         return;
+//     }
+
+//     // bufferCursor = 0;
+//     // Serial.println("RESPONSE:");
+//     // while (1)
+//     // {
+//     //     if (client.readBytes(&buffer, 1) != 0)
+//     //     {
+//     //         Serial.printf("%02X", buffer);
+//     //         bufferCursor++;
+//     //     }
+//     //     else
+//     //     {
+//     //         break;
+//     //     }
+//     // }
+//     // Serial.println();
+// }
+
+// Serial.printf("_zmq_version %d\n", _zmq_version);
+// }
+
+// void zmq_init()
+// {
+//     // initialize zmq socket
+
+//     // char greetingHead[] = {
+//     //     // signature
+//     //     0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F,
+//     //     // revision (2.0)
+//     //     0x01,
+//     //     // socket-type
+//     //     0x03,
+//     //     // identity
+//     //     0x00, 0x00,
+//     //     //
+//     // };
+
+//     char greetingHead[] = {
+//         // signature
+//         0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F,
+//         // version (3.0)
+
+//         //
+//     };
+
+//     char greetingTail[] = {
+//         0x03, 0x00,
+//         // mechanism
+//         'N', 'U', 'L', 'L', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         // as-server
+//         0x00,
+//         // filler
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         //
+//     };
+
+//     char handshake[] = {
+//         // READY command
+//         // command-flags
+//         0x04, // command frame (bit 2)
+//         // command-size
+//         38,
+//         // command-body
+//         5, 'R', 'E', 'A', 'D', 'Y',
+//         // command-data
+//         // property-name
+//         11, 'S', 'o', 'c', 'k', 'e', 't', '-', 'T', 'y', 'p', 'e',
+//         // property-value
+//         0x00, 0x00, 0x00, 0x03, 'R', 'E', 'Q',
+//         // property-name
+//         8, 'I', 'd', 'e', 'n', 't', 'i', 't', 'y',
+//         // // property-value
+//         0x00, 0x00, 0x00, 0x00,
+//         //
+//     };
+
+//     char nullFrame[] = {
+//         // READY command
+//         // command-size
+//         0b00000000, 0,
+//         // command-body
+
+//         //
+//     };
+
+//     uint8_t buffer = 0;
+
+//     Serial.printf("sizeof(greetingHead): %d", sizeof(greetingHead));
+//     Serial.println();
+//     Serial.printf("sizeof(greetingHead): %d", sizeof(greetingTail));
+//     Serial.println();
+
+//     Serial.println("REQUEST:");
+//     for (uint8_t i = 0; i < sizeof(greetingHead); i++)
+//     {
+//         Serial.printf("%02X", greetingHead[i]);
+//     }
+//     Serial.println();
+
+//     for (uint8_t i = 0; i < sizeof(greetingTail); i++)
+//     {
+//         Serial.printf("%02X", greetingTail[i]);
+//     }
+//     Serial.println();
+
+//     client.print(greetingHead);
+//     // client.print(greetingTail);
+
+//     // Serial.println("Block until response comes...");
+//     // while (client.peek() == -1)
+//     // {
+//     //     //
+//     // }
+
+//     /**
+//      * Read the first octet from the other peer.
+//      * If this octet is not %FF, then the other peer is using ZMTP/1.0.
+//      * https://rfc.zeromq.org/spec:15/ZMTP/
+//      */
+
+//     Serial.println("RESPONSE:");
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+
+//     // client.print(null_frame);
+
+//     //
+
+//     // Serial.printf("sizeof(greetingTail): %d", sizeof(greetingTail));
+//     // Serial.println();
+
+//     // Serial.println("REQUEST:");
+//     // for (uint8_t i = 0; i < sizeof(greetingTail); i++)
+//     // {
+//     //     Serial.printf("%02X", greetingTail[i]);
+//     // }
+//     // Serial.println();
+
+//     // client.print(greetingTail);
+
+//     // // Serial.println("Block until response comes...");
+//     // // while (client.peek() == -1)
+//     // // {
+//     // //     client.peekBytes(&buffer, 1);
+//     // //     Serial.println(buffer);
+//     // //     if (buffer == 0x7f)
+//     // //     {
+//     // //         break;
+//     // //     }
+//     // // }
+
+//     // Serial.println("RESPONSE:");
+//     // while (1)
+//     // {
+//     //     if (client.readBytes(&buffer, 1) != 0)
+//     //     {
+//     //         Serial.printf("%02X", buffer);
+//     //     }
+//     //     else
+//     //     {
+//     //         break;
+//     //     }
+//     // }
+//     // Serial.println();
+
+//     //
+
+//     // std::string content = "{\"ProtocolVersion\":1,\"Code\":2}";
+
+//     // std::vector<char> frame = {};
+
+//     // frame.push_back(0x02); // flags: long frame
+
+//     // int length = content.length();
+
+//     // for (int i = 7; i >= 0; i--)
+//     // {
+//     //     if (i > 3)
+//     //     {
+//     //         frame.push_back(0x00);
+//     //     }
+//     //     else
+//     //     {
+//     //         // Decompose only the last 4 bytes (32 bits) of length
+//     //         frame.push_back((length >> (i * 8)) & 0xFF);
+//     //     }
+//     // }
+
+//     // std::copy(content.begin(), content.end(), std::back_inserter(frame));
+
+//     // Serial.println("REQUEST:");
+//     // for (char c : frame)
+//     // {
+//     //     Serial.printf("%02X", c);
+//     // }
+//     // Serial.println();
+
+//     // Serial.printf("sizeof(handshake): %d", sizeof(handshake));
+//     // Serial.println();
+
+//     Serial.println("REQUEST:");
+//     for (uint8_t i = 0; i < sizeof(handshake); i++)
+//     {
+//         Serial.printf("%02X", handshake[i]);
+//     }
+//     Serial.println();
+
+//     client.print(handshake);
+
+//     // Serial.println("Block until response comes...");
+//     // while (client.peek() == -1)
+//     // {
+//     //     //
+//     // }
+
+//     Serial.println("RESPONSE:");
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+
+//     Serial.printf("sizeof(greetingTail): %d", sizeof(greetingTail));
+//     Serial.println();
+
+//     Serial.println("REQUEST:");
+//     for (uint8_t i = 0; i < sizeof(greetingTail); i++)
+//     {
+//         Serial.printf("%02X", greetingTail[i]);
+//     }
+//     Serial.println();
+
+//     client.print(greetingTail);
+
+//     // Serial.println("Block until response comes...");
+//     // while (client.peek() == -1)
+//     // {
+//     //     client.peekBytes(&buffer, 1);
+//     //     Serial.println(buffer);
+//     //     if (buffer == 0x7f)
+//     //     {
+//     //         break;
+//     //     }
+//     // }
+
+//     Serial.println("RESPONSE:");
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+
+//     std::string content = "{\"ProtocolVersion\":1,\"Code\":2}";
+
+//     std::vector<char> frame = {};
+
+//     frame.push_back(0x02); // flags: long frame
+
+//     int length = content.length();
+
+//     for (int i = 7; i >= 0; i--)
+//     {
+//         if (i > 3)
+//         {
+//             frame.push_back(0x00);
+//         }
+//         else
+//         {
+//             // Decompose only the last 4 bytes (32 bits) of length
+//             frame.push_back((length >> (i * 8)) & 0xFF);
+//         }
+//     }
+
+//     std::copy(content.begin(), content.end(), std::back_inserter(frame));
+
+//     Serial.println("REQUEST:");
+//     for (char c : frame)
+//     {
+//         Serial.printf("%02X", c);
+//     }
+//     Serial.println();
+
+//     client.print(frame.data());
+
+//     Serial.println("RESPONSE:");
+//     while (1)
+//     {
+//         if (client.readBytes(&buffer, 1) != 0)
+//         {
+//             Serial.printf("%02X", buffer);
+//         }
+//         else
+//         {
+//             break;
+//         }
+//     }
+//     Serial.println();
+// }
+
+unsigned long controllerTimeoutLastMillis = millis();
+unsigned long testMillis = millis();
+
+bool encodeVelocity(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
+{
+    double velocity[] = {42.5, 10, 0};
+
+    return pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed64(stream, &velocity[0]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed64(stream, &velocity[1]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed64(stream, &velocity[2]);
+};
+
+bool encodePosition(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
+{
+    // XYZ vector
+    float position[] = {0, 0, 0};
+
+    return pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &position[0]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &position[1]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &position[2]);
+};
+
+bool encodeOrientation(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
+{
+    // XYZW quaternion
+    float orientation[] = {0, 0, 0, 0};
+
+    return pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &orientation[0]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &orientation[1]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &orientation[2]) &&
+           pb_encode_tag_for_field(stream, field) &&
+           pb_encode_fixed32(stream, &orientation[3]);
+};
+
+// bool protobufSendCallback(pb_ostream_t* stream, const uint8_t* buffer, size_t count)
+// {
+//     auto result = new std::string();
+//     // result->assign(buffer, buffer + stream.bytes_written);
+
+//     Serial.println("--------------------");
+//     for (size_t i = 0; i < count; i++)
+//     {
+//         Serial.printf("%02X", (char)buffer[i]);
+//     }
+//     Serial.println();
+//     Serial.println(count);
+
+//     // const char* buf = (const char*)buffer;
+
+//     controllerSocket->send((const char*)buffer);
+
+//     delete result;
+//     // FILE* file = (FILE*)stream->state;
+//     // return fwrite(buf, 1, count, file) == count;
+// }
+
+bool toggle = false;
+
+void updateState()
+{
+    ControllerStateRequest request = ControllerStateRequest_init_default;
+
+    request.has_Version = true;
+    request.Version = 3;
+    request.has_TaskType = true;
+    request.TaskType = 0x01; // SendFullState
+
+    VRController controllerState = VRController_init_default;
+
+    // VRControllerState_t buttonState;
+
+    controllerState.has_ControllerId = true;
+    controllerState.ControllerId = ESP.getChipId();
+    controllerState.has_Status = true;
+    controllerState.Status = 0; // active
+    controllerState.has_SuggestedHand = true;
+    controllerState.SuggestedHand = HandType_Right;
+    // controllerState.Velocity.funcs.encode = encodeVelocity;
+    controllerState.Position.funcs.encode = encodePosition;
+    controllerState.Orientation.funcs.encode = encodeOrientation;
+
+    VRControllerState_t buttonState = VRControllerState_t_init_default;
+
+    buttonState.has_ulButtonPressed = true;
+    buttonState.ulButtonPressed = 1 << 0 & (toggle ? UINT64_MAX : 0);
+
+    controllerState.has_ButtonState = true;
+    controllerState.ButtonState = buttonState;
+
+    request.has_ControllerState = true;
+    request.ControllerState = controllerState;
+
+    uint8_t buffer[1024] = {};
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+    // pb_ostream_t stream = {&protobufSendCallback, NULL, SIZE_MAX, 0};
+    pb_encode(&stream, ControllerStateRequest_fields, &request);
+
+    Serial.println("--------------------");
+    for (size_t i = 0; i < stream.bytes_written; i++)
+    {
+        Serial.printf("%02X", buffer[i]);
+    }
+    Serial.println();
+    // Serial.println(stream.bytes_written);
+    // return buffer;
+    controllerSocket->send(
+        new ZMQMessage(buffer, stream.bytes_written));
+
+    toggle = !toggle;
+}
+
+void loop()
+{
+    // if (millis() - testMillis >= 1000)
+    // {
+    //     testMillis = millis();
+    //     socket->send("mlem");
+    // }
+
+    // delay(1000);
+
+    // socket->send("mlem");
+
+    ZMQSocket::work();
+
+    // socket->recv(0);
+
+    if (controllerSocket != NULL)
+    {
+        if (millis() - controllerTimeoutLastMillis >= 2000)
+        {
+            controllerTimeoutLastMillis = millis();
+
+            updateState();
+
+            // controllerSocket->send(new ZMQMessage("")); // Keep-alive
+
+            // controllerSocket->recv();
+
+            // Serial.println(reply->c_str());
+
+            // ControllerStateRequest request = ControllerStateRequest_init_default;
+
+            // request.has_Version = true;
+            // request.Version = 3;
+            // request.has_TaskType = true;
+            // request.TaskType = 0x01; // SendFullState
+
+            // VRController controllerState = VRController_init_default;
+
+            // // VRControllerState_t buttonState;
+
+            // controllerState.has_ControllerId = true;
+            // controllerState.ControllerId = ESP.getChipId();
+            // controllerState.has_Status = true;
+            // controllerState.Status = 0; // active
+            // // controllerState.ButtonState = buttonState;
+            // // controllerState.Acceleration
+            // controllerState.has_SuggestedHand = true;
+            // controllerState.SuggestedHand = HandType_Right;
+            // controllerState.Velocity.funcs.encode = encodeVelocity;
+
+            // request.has_ControllerState = true;
+            // request.ControllerState = controllerState;
+
+            // uint8_t buffer[1024] = {};
+            // pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+            // // pb_ostream_t stream = {&protobufSendCallback, NULL, SIZE_MAX, 0};
+            // pb_encode(&stream, ControllerStateRequest_fields, &request);
+
+            // Serial.println("--------------------");
+            // for (size_t i = 0; i < stream.bytes_written; i++)
+            // {
+            //     Serial.printf("%02X", (unsigned int)buffer[i]);
+            // }
+            // Serial.println();
+            // Serial.println(stream.bytes_written);
+
+            // char* buf = reinterpret_cast<char*>(buffer);
+
+            // for (size_t i = 0; i < sizeof(buf); i++)
+            // {
+            //     Serial.printf("%02X", buf[i]);
+            // }
+            // Serial.println();
+
+            // controllerSocket->send(
+            //     new ZMQMessage(buffer, stream.bytes_written));
+        }
+    }
+    // socket->send("{\"ProtocolVersion\":1,\"Code\":2}");
+    // // socket->send("Hello");
+
+    // char *buffer;
+
+    // socket->recv(buffer);
+    // Serial.println(buffer);
+    // // Serial.println(socket->recvString().c_str());
+
+    // delay(5000);
+    // put your main code here, to run repeatedly:
+    //   digitalWrite(LED_BUILTIN, LOW);
+    //   delay(500);
+    // digitalWrite(LED_BUILTIN, HIGH);
+    // delay(16);
+
+    // digitalWrite(LED_EXT, LOW);
+    // delay(2000);
+    // digitalWrite(LED_EXT, HIGH);
+    // delay(2000);
+
+    // socket->send("mlem");
+
+    // if (client.connected())
+    // {
+    //     char frame[] = {
+    //         // MESSAGE
+    //         // short-size
+    //         0x01, 1,
+    //         42
+    //         //
+    //     };
+
+    //     Serial.printf("sizeof(frame): %d", sizeof(frame));
+    //     Serial.println();
+
+    //     client.print(frame);
+    // }
+    //     // char buffer[1024];
+    //     DynamicJsonDocument doc(2048);
+    //     doc["sensor"] = "gps";
+    //     doc["time"] = 1351824120;
+
+    //     // Add an array.
+    //     //
+    //     JsonArray data = doc.createNestedArray("data");
+    //     data.add(48.756080);
+    //     data.add(2.302038);
+    //     ArduinoJson::serializeJson(doc, client);
+    //     // client.print("mlem");
+    // }
+}

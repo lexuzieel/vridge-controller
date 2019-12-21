@@ -1,0 +1,49 @@
+#ifndef ZMQClient_H
+#define ZMQClient_H
+
+#include <Arduino.h>
+#include <WiFiClient.h>
+#include "ZMQSocket.h"
+
+#define ZMQ_VERSION_1 1
+#define ZMQ_VERSION_2 2
+#define ZMQ_VERSION_3 3
+
+class ZMQSocket;
+
+/**
+ * TCP connection client.
+ * This class handles data transmission.
+ */
+class ZMQClient
+{
+private:
+    WiFiClient client;
+    uint8_t _zmq_version = 0;
+    uint8_t _ZMQ_VERSION_major = 0;
+    uint8_t _ZMQ_VERSION_minor = 0;
+
+public:
+    /**
+     * Connect specificed SOCKET TYPE to the HOST on PORT.
+     * Provides reference to the connection SOCKET instance.
+     */
+    boolean connect(ZMQSocketType type,
+                 const char *host,
+                 uint16_t port,
+                 ZMQSocket *&socket);
+
+    /**
+     * Write byte array to the connection stream.
+     */
+    void write(const char *buffer, size_t size);
+
+    /**
+     * Read byte array from the connection stream.
+     *
+     * Returns number of bytes written.
+     */
+    size_t read(char *buffer, size_t length);
+};
+
+#endif
